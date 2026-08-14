@@ -1,74 +1,129 @@
-# DeepSeek Harness
+# DeepSeek Harness for AionUi
 
 English | [中文](README.zh.md)
 
-DeepSeek Harness (`dsh`) is an open-source agent harness developed by [DeepSeek AI](https://deepseek.com).
+Use DeepSeek Harness as a local custom agent in AionUi, with streamed answers, reasoning, tool status, and plans over the standard Agent Client Protocol.
 
-It uses an architecture where **everything is a plugin**, and is powered by [Cordis](https://github.com/cordiverse/cordis), whose design is described in [_A Programming Paradigm for Spatiotemporal Composability_](https://github.com/cordiverse/paper).
+This is a community integration built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It is not an official DeepSeek AI or AionUi release.
 
-## AionUi integration fork
+## What this project is
 
-This public fork adds an [AionUi](https://github.com/iOfficeAI/AionUi) integration to DeepSeek Harness. AionUi starts Harness as a custom ACP agent and communicates with it over newline-delimited JSON-RPC on stdin/stdout.
+This project connects [AionUi](https://github.com/iOfficeAI/AionUi) to the DeepSeek Harness runtime. AionUi starts the bundled launcher as a local child process, then exchanges newline-delimited ACP JSON-RPC messages with Harness over stdin/stdout.
 
-This is not a standalone plugin installed inside DeepSeek Harness. The implementation extends Harness's existing ACP transport with an opt-in `rich` output projection and provides [`scripts/aionui-acp.mjs`](scripts/aionui-acp.mjs) as the local launcher that AionUi executes. From AionUi's perspective it behaves like an ACP agent integration; inside this repository it is an ACP adapter plus launcher.
+| Perspective | Role |
+|---|---|
+| AionUi | A custom ACP agent that AionUi can start and render. |
+| DeepSeek Harness | An opt-in `rich` ACP output projection plus a local launcher. |
+| GitHub | A public fork that preserves upstream history and makes the integration reproducible. |
 
-The integration gives AionUi:
+It is not a standalone plugin installed inside DeepSeek Harness. From AionUi's perspective it behaves like an agent integration; inside this repository it is an ACP adapter and launcher.
 
-- streamed assistant text and reasoning;
-- tool-call start, completion, and failure updates;
-- `todo/write` state as ACP plan updates;
-- normal Harness tool execution, workspace permissions, session logging, and DeepSeek model access.
+```text
+AionUi
+  ↕ ACP JSON-RPC over stdio
+scripts/aionui-acp.mjs
+  ↓
+DeepSeek Harness
+  ↓ HTTPS
+DeepSeek API
+```
 
-The default `committed` ACP projection remains available for automation clients. The AionUi launcher selects `rich` output so the interface can show an agent turn while it runs.
+## Features
 
-### Connect it to AionUi
+- Streams assistant text while the model is responding.
+- Sends reasoning as ACP thought updates.
+- Shows tool-call start, completion, failure, and result content.
+- Projects `todo/write` state as AionUi plan updates.
+- Keeps Harness tool execution, workspace permissions, session logging, compaction, subagents, and workflows available.
 
-Install Node.js 22.19 or newer, then clone this integration branch and install its dependencies:
+## Quick start
+
+### Prerequisites
+
+- Node.js 22.19.x or Node.js 24 and newer.
+- `pnpm`, enabled through Corepack in the steps below.
+- AionUi and a valid DeepSeek API key.
+
+### 1. Install
 
 ```sh
-git clone --branch codex/aionui-acp-bridge git@github.com:siweili-1113/deepseek-harness.git
-cd deepseek-harness
+git clone --branch aionui https://github.com/siweili-1113/deepseek-harness-aionui.git
+cd deepseek-harness-aionui
 corepack enable
 pnpm install --frozen-lockfile
 ```
+
+### 2. Add the custom agent
 
 In AionUi, open **Settings → Agents → Add custom Agent** and enter:
 
 ```text
 Name: DeepSeek Harness
 Command: node
-Arguments: /absolute/path/to/deepseek-harness/scripts/aionui-acp.mjs
+Arguments: /absolute/path/to/deepseek-harness-aionui/scripts/aionui-acp.mjs
 Environment:
   DEEPSEEK_API_KEY=<your DeepSeek API key>
 ```
 
-The connection test starts the ACP server without calling the model. The first prompt requires a valid DeepSeek API key. Keep the key in AionUi's environment configuration or a local `.env`; never commit it.
+Use the actual absolute checkout path on your computer. Keep `Command` as `node`; the launcher resolves every other repository path itself and reserves stdout for ACP messages.
 
-For another computer, clone the same branch, run `pnpm install --frozen-lockfile`, update the absolute launcher path in AionUi, and configure the API key again. Do not copy `node_modules`; `pnpm install` recreates it for that computer. See the [ACP example guide](examples/acp-agent/README.md#aionui-custom-agent) for protocol and troubleshooting details.
+### 3. Connect and prompt
 
-### Why this is a fork
+AionUi's connection test starts the ACP server and creates a session without calling the model. Send a prompt to verify the DeepSeek credential and rich updates. The first dependency load can make the initial startup slower than later launches.
 
-GitHub fork status is not required at runtime. It preserves the relationship to the official DeepSeek Harness repository, makes this patch easy to compare or contribute upstream, and allows later upstream updates to be incorporated. A local AionUi installation only needs this checkout and its dependencies.
+## Move to another computer
 
-## Developer preview
+1. Install Node.js, Git, and AionUi.
+2. Clone the `aionui` branch and run `pnpm install --frozen-lockfile`.
+3. Point AionUi to the new absolute path of `scripts/aionui-acp.mjs`.
+4. Configure a valid DeepSeek API key on the new computer.
 
-DeepSeek Harness is currently in _developer preview_ and is iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
+Do not copy `node_modules`. It contains generated, platform-dependent dependencies and is recreated by `pnpm install`.
 
-## Run
+## Local data and secrets
 
-### Run from `npm`
+| Path | Purpose | Commit it? |
+|---|---|---|
+| `node_modules/` | Installed JavaScript dependencies for this computer. | No; regenerate it with `pnpm install`. |
+| `.env` | Optional local environment values, including credentials. | No. |
+| `.sessions/` | Local Harness session data created while running. | No. |
 
-Install `Node.js`, then run:
+Never place a real API key in source, README examples, commits, issues, or screenshots. If a key is exposed, revoke it and create a replacement.
+
+## How it works
+
+DeepSeek Harness already provides an ACP server for automation. Its default `committed` projection sends complete committed answers. This project adds an explicit `rich` projection that streams text and reasoning deltas, tool-call lifecycle updates, and todo plans. [`scripts/aionui-acp.mjs`](scripts/aionui-acp.mjs) starts the source ACP application with `rich` selected unless the environment overrides it.
+
+The integration uses standard ACP updates rather than an AionUi-specific private protocol. The [ACP example guide](examples/acp-agent/README.md#aionui-custom-agent) owns setup and troubleshooting details; the [ACP package README](packages/acp/acp/README.md) defines protocol behavior and limitations.
+
+## Limitations
+
+- AionUi and this checkout must be on the same computer because AionUi starts a local child process.
+- ACP currently creates fresh sessions; session browsing, resume, and deletion remain outside this integration.
+- Prompts support the ACP baseline used by the Harness bridge; non-empty MCP server lists and additional directories reject.
+- `rich` favors interactive latency and can show partial provider output before a retry commits; automation that requires attempt-clean output should use `committed`.
+
+## Upstream relationship
+
+GitHub fork status is a distribution choice, not a runtime requirement. It preserves the official repository history, keeps the patch easy to inspect, and allows upstream updates to be incorporated. A local AionUi installation only needs this checkout and its installed dependencies.
+
+The upstream project remains the source for general DeepSeek Harness documentation, releases, community support, and contribution rules. This fork keeps the upstream MIT license and attribution.
+
+<a id="run"></a>
+
+### Run the upstream Web UI
+
+To run the published standalone Harness Web UI instead of this source integration:
 
 ```sh
 npx @deepseek-ai/dsh web
 ```
 
-The command starts the Web UI, served at `http://127.0.0.1:3080` by default. See [Web UI guide](docs/user/guide/index.md).
+<a id="run-from-source"></a>
 
-### Run from source
+### Run the upstream project from source
 
-To run from a repository checkout:
+For a clean checkout without this integration, use the official repository:
 
 ```sh
 git clone https://github.com/deepseek-ai/deepseek-harness.git
@@ -78,24 +133,25 @@ pnpm run build
 pnpm dsh web
 ```
 
-## Community and support
-
-- Feel free to submit feedback or bug reports through [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions).
-- Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to your plugin repository for discoverability.
-- Join <a href="https://discord.gg/Ycq5dCaS4">DeepSeek Harness Discord community</a>.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
 ## Development
 
-Start with the [development guide](docs/development.md) and [architecture documentation](docs/architecture.md).
+Run the focused checks that cover this integration:
 
-For agents, follow [AGENTS.md](AGENTS.md).
+```sh
+pnpm exec vitest run packages/acp/acp/tests --coverage --coverage.include='packages/acp/acp/src/index.ts'
+pnpm exec vitest run --config vitest.snapshot.config.ts -t todo-write
+pnpm run doc-sync
+pnpm run lint
+pnpm run build
+```
+
+Design and implementation references:
+
+- [ACP rich-output decision](.agents/notes/implemented/feature/2026-08-14-acp-rich-output-projection.md)
+- [ACP example and AionUi setup](examples/acp-agent/README.md#aionui-custom-agent)
+- [ACP transport package](packages/acp/acp/README.md)
+- [DeepSeek Harness architecture](docs/architecture.md)
 
 ## License
 
-[MIT](LICENSE)
-
-Third-party dependencies and their licenses are disclosed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE). Third-party dependencies and their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
