@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-ACP automation server app: the default agent spine, client-created agents through [`@deepseek-ai/dsh-acp`](../../acp/acp/README.md), JSONL persistence, and semantic checkpointing behind one JSON-RPC stdio bin. Programmatic clients create fresh sessions; this package mounts no human UI.
+ACP server app: the default agent spine, client-created agents through [`@deepseek-ai/dsh-acp`](../../acp/acp/README.md), JSONL persistence, and semantic checkpointing behind one JSON-RPC stdio bin. Programmatic and interactive clients create fresh sessions; this package mounts no human UI.
 
 ## Composition
 
@@ -12,7 +12,7 @@ ACP automation server app: the default agent spine, client-created agents throug
 | `@deepseek-ai/dsh-session-persistence-jsonl` | Durable session logs used by checkpointing, observability, and snapshot replay. |
 | `@deepseek-ai/dsh-session-checkpoint-policy` | Durability barriers before model calls and top-level tool effects, plus completed-step checkpoints. |
 | `@deepseek-ai/dsh-session-query-sqlite` | Derived exact/FTS session-query service, opened before the ACP transport so leaf consumers are ready for the first model request. |
-| `@deepseek-ai/dsh-acp` | Automation-only ACP transport over stdin/stdout. |
+| `@deepseek-ai/dsh-acp` | ACP transport over stdin/stdout with committed or rich output. |
 
 The app does not install commands, user interaction, session navigation, configuration pickers, or a stdout logger. It owns these plugins through one ordered effect so the query service is ready before ACP accepts work and ACP sessions quiesce before checkpointing and persistence detach. Leaf configurations supply LLM, executor, sandbox, approval, filesystem, and model-facing tool plugins.
 
@@ -22,6 +22,7 @@ The app does not install commands, user interaction, session navigation, configu
 |---|---|---|
 | `provider` | required | Provider route for each ACP-created agent. |
 | `model` | required | Model for each ACP-created agent. |
+| `acpOutput` | `committed` | ACP output projection; `rich` emits live text, reasoning, tool calls, and plans. |
 | `maxParallelToolCalls` | agent-loop default | Positive-integer tool-call concurrency cap; `1` is serial. |
 | `persona` | — | Deployment persona template for `dsh-system-prompt`. |
 | `toolOrder` | lexicographic | Explicit model-facing tool order for `dsh-system-prompt`. |
@@ -56,4 +57,4 @@ Append-only per session; the app adds no request-prefix content itself.
 
 - **JSONL persistence is fixed** — a different backend requires another composition.
 - **Sibling plugins can corrupt stdout** — the app cannot prevent another entry from writing non-protocol bytes.
-- **Fresh automation sessions only** — resume and human interaction belong to other entry points.
+- **Fresh sessions only** — resume and human questions belong to other entry points.

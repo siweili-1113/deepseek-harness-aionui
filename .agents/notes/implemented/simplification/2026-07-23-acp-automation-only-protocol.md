@@ -4,6 +4,8 @@ Status: implemented
 
 English | [中文](2026-07-23-acp-automation-only-protocol.zh.md)
 
+> The committed projection remains automation-only. [ACP rich output](../feature/2026-08-14-acp-rich-output-projection.md) adds an explicit interactive projection of logged text, reasoning, tool, and todo events without restoring the removed editor surfaces.
+
 ## Problem
 
 The ACP bridge had become a second interactive product UI. It translated durable events into editor cards, terminal metadata, diffs, plans, titles, reasoning, commands, modes, model and permission pickers, session navigation, and human elicitation. Those responsibilities duplicated the TUI and the Web client while coupling an automation transport to UI services, persistence queries, presentation policy, and editor-specific conventions.
@@ -14,9 +16,9 @@ The snapshot suite complicates removal. Most ACP scenarios exercise the assemble
 
 ## Decision
 
-`@deepseek-ai/dsh-acp` is an automation transport under [`packages/acp/acp`](../../../../packages/acp/acp/README.md), outside the `ui` package group. Its public protocol is intentionally small: version negotiation, fresh text sessions with one in-flight prompt each, committed assistant text updates, per-session cancellation, concurrent sessions, and connection-owned teardown. Prompts carry the spec-required baseline only — text plus resource links flattened to bracketed textual references; the bridge rejects additional directories, MCP servers, beyond-baseline prompt content (image, audio, embedded resources), empty prompts, unknown sessions, and overlapping prompts.
+`@deepseek-ai/dsh-acp` is a transport under [`packages/acp/acp`](../../../../packages/acp/acp/README.md), outside the `ui` package group. Its default committed projection is intentionally small: version negotiation, fresh text sessions with one in-flight prompt each, committed assistant text updates, per-session cancellation, concurrent sessions, and connection-owned teardown. Prompts carry the spec-required baseline only — text plus resource links flattened to bracketed textual references; the bridge rejects additional directories, MCP servers, beyond-baseline prompt content (image, audio, embedded resources), empty prompts, unknown sessions, and overlapping prompts.
 
-The bridge emits only committed `assistant/message` text. Reasoning, raw chunks, tool activity, todos, plans, titles, retry markers, terminal metadata, diffs, locations, and resource links remain in the durable session log or in UI-specific transports. It does not provide session load/list/delete, commands, modes, configuration selectors, model switching, plan review, or human elicitation.
+The committed projection emits only `assistant/message` text. An explicit rich projection maps logged text and reasoning deltas, tool activity, and todo snapshots to standard ACP updates. Titles, retry markers, terminal metadata, diffs, locations, and resource links remain in the durable session log or in UI-specific transports. Neither projection provides session load/list/delete, commands, modes, configuration selectors, model switching, plan review, or human elicitation.
 
 One-shot `session/request_permission` remains. It is a machine policy channel for bridge-owned agents, not a human approval UI: the answerer accepts only an exact agent object in the bridge's live session map, delegates foreign or call-less requests, and maps failed RPCs to the fail-closed unavailable outcome. The client chooses allow once, reject once, or cancel, and the bridge never turns that response into a durable grant. Asking policy stays in the approval seam and its producers; [`dsh-subagent-acp`](../../../../packages/subagent/subagent-acp/README.md) uses this channel programmatically.
 
@@ -46,8 +48,8 @@ Protocol and lifecycle tests pin stop-reason and prompt codecs, version negotiat
 
 ## Consequences
 
-ACP has a narrow contract suitable for agents and automation, while TUI and Web own human interaction and presentation. The package has fewer injected services, dependencies, protocol branches, and lifecycle states, and it no longer claims compatibility as a general editor entry point.
+ACP keeps a narrow default contract suitable for agents and automation, while TUI and Web own complete human interaction and presentation. The package has fewer injected services, dependencies, protocol branches, and lifecycle states than the removed editor bridge, and its optional rich projection does not claim compatibility as a general editor entry point.
 
-Automation clients receive complete committed text rather than token deltas or structured tool UI. They inspect durable logs or another API when they need reasoning, tool traces, titles, or richer state. Fresh-session-only operation also means callers that need durable browsing or resume use a host API rather than ACP.
+Automation clients receive complete committed text rather than token deltas or structured tool UI. Interactive clients may opt into the generic rich projection for reasoning, tool progress, and todos; durable browsing, titles, resume, and tool-specific presentation still require a host API or product UI.
 
 Backend snapshot coverage therefore remains transport-coupled to ACP even though that transport is incidental to the behavior under test.

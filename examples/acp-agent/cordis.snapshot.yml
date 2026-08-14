@@ -24,6 +24,7 @@
         config:
           provider: deepseek-official
           model: deepseek-v4-flash
+          acpOutput: !!js "process.env.DSH_ACP_OUTPUT ?? 'committed'"
           persistenceRoot: !!js process.env.DSH_SNAPSHOT_SESSIONS_ROOT ?? './.sessions'
           # Replay fixtures are raw JSONL; the whole-config patch must restate
           # the compression choice or the default zstd frames hide the logs

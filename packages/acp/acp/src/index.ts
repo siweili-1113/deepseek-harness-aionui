@@ -1,9 +1,10 @@
 /**
- * Automation-only Agent Client Protocol server over JSON-RPC stdio.
+ * Agent Client Protocol server over JSON-RPC stdio.
  *
- * The bridge exposes fresh harness sessions to trusted programmatic clients. It
- * carries prompt text, committed assistant text, cancellation, and one-shot
- * permission decisions; presentation and human-interaction features stay with
+ * The bridge exposes fresh harness sessions to trusted ACP clients. Its default
+ * projection carries committed assistant text for automation; an explicit rich
+ * projection additionally carries live text, reasoning, tool calls, and plans
+ * for interactive clients. Human questions and session navigation remain with
  * the harness's UI modules.
  *
  * @module @deepseek-ai/dsh-acp
@@ -32,6 +33,7 @@ import {
   type SessionNotification,
   type StopReason,
   type Stream,
+  type ToolKind,
 } from '@agentclientprotocol/sdk'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId, type SessionEvent, type TurnEndReason } from '@deepseek-ai/dsh-session'
@@ -66,12 +68,14 @@ function internalError(detail: string): RequestError {
   return RequestError.internalError(undefined, detail)
 }
 
-/** Plugin config: the provider/model selection used for each ACP-created agent. */
+/** Plugin config for ACP-created agents and their wire projection. */
 export interface AcpConfig {
   /** Provider route for created agents. */
   provider?: string
   /** Model name for created agents. */
   model?: string
+  /** Wire projection: committed answers for automation, or live updates for interactive clients. */
+  output?: 'committed' | 'rich'
   /** Runtime-only transport override; production uses stdio. */
   stream?: Stream
 }
@@ -79,6 +83,7 @@ export interface AcpConfig {
 export const Config: Schema<AcpConfig> = Schema.object({
   provider: Schema.string(),
   model: Schema.string(),
+  output: Schema.union(['committed', 'rich']).default('committed'),
 })
 
 /** Per-session protocol state. */
@@ -86,6 +91,8 @@ interface SessionRecord {
   agent: Agent
   /** Exact owned-agent disposer; resolves after registry, loop, and session teardown. */
   dispose: () => Promise<void>
+  /** Rich-projection metadata retained until each tool result arrives. */
+  toolCalls: Map<string, { title: string; kind: ToolKind; rawInput: unknown }>
   /** In-flight prompt and its captured turn number for exact settlement. */
   inflight: {
     resolve: (reason: StopReason) => void
@@ -98,9 +105,9 @@ interface SessionRecord {
 }
 
 /**
- * Mount the automation-only ACP server.
+ * Mount the ACP server.
  * @param ctx - Cordis context carrying the agent factory and session events.
- * @param config - Initial provider/model selection and optional test transport.
+ * @param config - Initial provider/model selection, output projection, and optional test transport.
  */
 export function apply(ctx: Context, config: AcpConfig): void {
   // ACP handlers execute outside this plugin's injection scope, so capture the
@@ -108,6 +115,7 @@ export function apply(ctx: Context, config: AcpConfig): void {
   const agents = ctx.agents
   const logger = ctx.logger
   const sessions = new Map<SessionId, SessionRecord>()
+  const richOutput = config.output === 'rich'
   let closed = false
   let conn: AgentSideConnection
 
@@ -149,14 +157,33 @@ export function apply(ctx: Context, config: AcpConfig): void {
     inflight.reject(internalError(`turn failed: ${reason.error.message}`))
   }
 
-  // Emit only committed assistant text. Raw chunks, reasoning, tools, plans,
-  // titles, and retry markers are presentation or trace data and stay off the
-  // automation wire.
   ctx.on('session/event', (session, event: SessionEvent) => {
     const record = sessions.get(session.header.id)
     if (record === undefined || record.agent.session !== session) return
     try {
-      if (event.type === 'assistant/message') {
+      if (richOutput && event.type === 'assistant/chunk') {
+        const chunk = event.data.chunk
+        const messageId = `${session.header.id}:${event.data.turn}:${event.data.step}:${chunk.type === 'reasoning-delta' ? 'thought' : 'answer'}`
+        if (chunk.type === 'text-delta' && chunk.text.length > 0) {
+          notify({
+            sessionId: record.agent.session.id,
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              messageId,
+              content: { type: 'text', text: chunk.text },
+            },
+          })
+        } else if (chunk.type === 'reasoning-delta' && chunk.text.length > 0) {
+          notify({
+            sessionId: record.agent.session.id,
+            update: {
+              sessionUpdate: 'agent_thought_chunk',
+              messageId,
+              content: { type: 'text', text: chunk.text },
+            },
+          })
+        }
+      } else if (!richOutput && event.type === 'assistant/message') {
         for (const block of event.data.message.content) {
           if (block.type === 'text' && block.text.length > 0) {
             notify({
@@ -179,6 +206,65 @@ export function apply(ctx: Context, config: AcpConfig): void {
             })
           }
         }
+      } else if (richOutput && event.type === 'tool/call') {
+        const rawInput = parseToolInput(event.data.arguments)
+        const kind = toolKind(event.data.name)
+        const title = toolTitle(event.data.name, rawInput)
+        record.toolCalls.set(event.data.callId, { title, kind, rawInput })
+        notify({
+          sessionId: record.agent.session.id,
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId: event.data.callId,
+            title,
+            kind,
+            status: 'in_progress',
+            rawInput,
+          },
+        })
+      } else if (richOutput && event.type === 'tool/result') {
+        const result = event.data.message.content[0]
+        const call = record.toolCalls.get(result.toolCallId)
+        const content = result.content.flatMap((block) => {
+          if (block.type === 'text') {
+            return [{ type: 'content' as const, content: { type: 'text' as const, text: block.text } }]
+          }
+          if (block.type === 'image') {
+            return [{
+              type: 'content' as const,
+              content: { type: 'text' as const, text: `[image attachment ${block.attachment.attachmentId}]` },
+            }]
+          }
+          return []
+        })
+        notify({
+          sessionId: record.agent.session.id,
+          update: {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: result.toolCallId,
+            status: result.isError || event.data.error !== undefined ? 'failed' : 'completed',
+            ...(call === undefined ? {} : { title: call.title, kind: call.kind }),
+            ...(content.length === 0 ? {} : { content }),
+            rawOutput: {
+              content: result.content,
+              ...(event.data.meta === undefined ? {} : { meta: event.data.meta }),
+              ...(event.data.error === undefined ? {} : { error: event.data.error }),
+            },
+          },
+        })
+        record.toolCalls.delete(result.toolCallId)
+      } else if (richOutput && event.type === 'todo/write') {
+        notify({
+          sessionId: record.agent.session.id,
+          update: {
+            sessionUpdate: 'plan',
+            entries: event.data.todos.map(todo => ({
+              content: todo.content,
+              status: todo.status,
+              priority: 'medium',
+            })),
+          },
+        })
       }
     } finally {
       const inflight = record.inflight
@@ -269,6 +355,7 @@ export function apply(ctx: Context, config: AcpConfig): void {
         sessions.set(sessionId, {
           agent: handle.agent,
           dispose: () => handle.dispose(),
+          toolCalls: new Map(),
           inflight: undefined,
         })
         return { sessionId }
@@ -412,6 +499,37 @@ export function apply(ctx: Context, config: AcpConfig): void {
   /* v8 ignore stop */
 
   ctx.effect(() => quiesce, 'acp.connection')
+}
+
+/** Parse model-produced tool arguments without hiding malformed provider output. */
+function parseToolInput(raw: string): unknown {
+  try {
+    return JSON.parse(raw) as unknown
+  } catch {
+    return { raw }
+  }
+}
+
+/** Map common harness tool names to ACP's display categories. */
+function toolKind(name: string): ToolKind {
+  if (['read', 'read_image'].includes(name)) return 'read'
+  if (['edit', 'write', 'str_replace_editor'].includes(name)) return 'edit'
+  if (['glob', 'grep', 'web_search'].includes(name)) return 'search'
+  if (name === 'web_fetch') return 'fetch'
+  if (['bash', 'pwsh'].includes(name) || name.startsWith('terminal_')) return 'execute'
+  return 'other'
+}
+
+/** Choose a concise ACP tool-card title from common argument fields. */
+function toolTitle(name: string, rawInput: unknown): string {
+  if (rawInput !== null && typeof rawInput === 'object') {
+    const input = rawInput as Record<string, unknown>
+    for (const key of ['description', 'command', 'path', 'query', 'url']) {
+      const value = input[key]
+      if (typeof value === 'string' && value.trim().length > 0) return value
+    }
+  }
+  return name.replaceAll('_', ' ')
 }
 
 /**

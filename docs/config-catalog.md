@@ -16,12 +16,14 @@ A `Requires:` line lists the service keys the plugin `inject`s: its `cordis.yml`
 Requires: `agents`
 
 ```ts config-catalog
-/** Plugin config: the provider/model selection used for each ACP-created agent. */
+/** Plugin config for ACP-created agents and their wire projection. */
 export interface AcpConfig {
   /** Provider route for created agents. */
   provider?: string
   /** Model name for created agents. */
   model?: string
+  /** Wire projection: committed answers for automation, or live updates for interactive clients. */
+  output?: 'committed' | 'rich'
   /** Runtime-only transport override; production uses stdio. */
   stream?: Stream
 }
@@ -29,7 +31,7 @@ export interface AcpConfig {
 
 Depends on: `Stream` (`@agentclientprotocol/sdk`)
 
-Source: [`packages/acp/acp/src/index.ts:70`](../packages/acp/acp/src/index.ts)
+Source: [`packages/acp/acp/src/index.ts:72`](../packages/acp/acp/src/index.ts)
 
 <a id="deepseek-aidsh-acp-demo"></a>
 
@@ -49,6 +51,8 @@ export interface Config {
   provider: string
   /** Model name for ACP-created agents (must have a registered adapter). */
   model: string
+  /** ACP wire projection; `rich` streams interactive updates for clients such as AionUi. */
+  acpOutput?: 'committed' | 'rich'
   /** Bundled agent-loop concurrency cap; `1` is serial and omission uses its default. */
   maxParallelToolCalls?: number
   /** Deployment persona (the system-prompt plugin's `persona` config). */

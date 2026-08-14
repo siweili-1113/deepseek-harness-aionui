@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-ACP（Agent Client Protocol）自动化服务器应用：默认 agent（智能体）主干、客户端通过 [`@deepseek-ai/dsh-acp`](../../acp/acp/README.md) 创建的 agent、JSONL 持久化，以及语义检查点机制，并通过一个 JSON-RPC stdio bin 对外提供服务。程序化客户端创建新会话；此包不挂载人工交互 UI。
+ACP（Agent Client Protocol）服务器应用：默认 agent（智能体）主干、客户端通过 [`@deepseek-ai/dsh-acp`](../../acp/acp/README.md) 创建的 agent、JSONL 持久化，以及语义检查点机制，并通过一个 JSON-RPC stdio bin 对外提供服务。程序化与交互式客户端创建新会话；此包不挂载人工交互 UI。
 
 ## 组合
 
@@ -12,7 +12,7 @@ ACP（Agent Client Protocol）自动化服务器应用：默认 agent（智能�
 | `@deepseek-ai/dsh-session-persistence-jsonl` | 检查点、可观测性和快照回放所使用的持久会话日志。 |
 | `@deepseek-ai/dsh-session-checkpoint-policy` | 在模型调用和顶层工具 effect 前建立持久性屏障，并为已完成步骤建立检查点。 |
 | `@deepseek-ai/dsh-session-query-sqlite` | 派生的精确／FTS 会话查询服务；先于 ACP 传输打开，使叶节点消费方在首次模型请求前就绪。 |
-| `@deepseek-ai/dsh-acp` | 通过 stdin／stdout 提供的纯自动化 ACP 传输。 |
+| `@deepseek-ai/dsh-acp` | 通过 stdin／stdout 提供 committed 或 rich 输出的 ACP 传输。 |
 
 应用不安装命令、用户交互、会话导航、配置选择器或 stdout logger。它通过一个有序 effect 拥有这些插件，因此查询服务会在 ACP 接受工作前就绪，而 ACP 会话会在检查点与持久化插件卸载前完全停稳。叶节点配置负责提供 LLM（大语言模型）、执行器、沙箱、审批、文件系统和面向模型的工具插件。
 
@@ -22,6 +22,7 @@ ACP（Agent Client Protocol）自动化服务器应用：默认 agent（智能�
 |---|---|---|
 | `provider` | 必填 | 每个由 ACP 创建的 agent 所用的提供方路由。 |
 | `model` | 必填 | 每个由 ACP 创建的 agent 所用的模型。 |
+| `acpOutput` | `committed` | ACP 输出投影；`rich` 发出实时文本、推理、工具调用和计划。 |
 | `maxParallelToolCalls` | agent loop（智能体循环）默认值 | 正整数工具调用并发上限；`1` 表示串行。 |
 | `persona` | 无 | 供 `dsh-system-prompt` 使用的部署 persona 模板。 |
 | `toolOrder` | 字典序 | 供 `dsh-system-prompt` 使用的显式面向模型工具顺序。 |
@@ -56,4 +57,4 @@ ACP（Agent Client Protocol）自动化服务器应用：默认 agent（智能�
 
 - **JSONL 持久化固定不变**：使用其他后端需要另一种组合。
 - **同级插件可能破坏 stdout**：应用无法阻止另一个 Cordis 配置项写入非协议字节。
-- **只支持新建自动化会话**：恢复和人工交互属于其他运行入口。
+- **只支持新建会话**：恢复与面向人类的提问属于其他运行入口。

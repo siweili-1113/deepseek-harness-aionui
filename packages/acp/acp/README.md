@@ -2,9 +2,9 @@
 
 English | [中文](README.zh.md)
 
-Automation-only [Agent Client Protocol](https://agentclientprotocol.com) server over JSON-RPC stdio. Programmatic clients create fresh harness agents, send text prompts, collect committed assistant text, resolve one-shot permission requests by policy, and cancel work. The primary in-repository client is [`dsh-subagent-acp`](../../subagent/subagent-acp/README.md).
+Fresh-session [Agent Client Protocol](https://agentclientprotocol.com) server over JSON-RPC stdio. Programmatic clients create harness agents, send text prompts, resolve one-shot permission requests by policy, and cancel work. The default committed projection serves automation clients such as [`dsh-subagent-acp`](../../subagent/subagent-acp/README.md); an explicit rich projection serves interactive ACP clients.
 
-This package is a transport adapter, not a UI integration or a capability seam. It does not expose editor navigation, transcript replay, commands, modes, configuration pickers, elicitation, reasoning, plans, titles, or tool presentation. Interactive rendering and human questions belong to the Web host and client modules.
+This package is a transport adapter, not a complete product UI or a capability seam. It does not expose editor navigation, transcript replay, commands, modes, configuration pickers, elicitation, titles, or session management. Rich output projects already logged reasoning, tool activity, and todo state through standard ACP updates; rendering policy and human questions remain client concerns.
 
 ## Plugin
 
@@ -14,8 +14,9 @@ This package is a transport adapter, not a UI integration or a capability seam. 
 |---|---|---|
 | `provider` | — | Initial provider route for every created agent. |
 | `model` | — | Initial model for every created agent. |
+| `output` | `committed` | `committed` emits complete assistant messages; `rich` emits live text, reasoning, tool calls, and plans. |
 
-Both fields are optional so another agent/request listener may supply the target. The runnable ACP composition requires both.
+`provider` and `model` are optional so another agent/request listener may supply the target. The runnable ACP composition requires both.
 
 ## Protocol contract
 
@@ -26,12 +27,12 @@ Both fields are optional so another agent/request listener may supply the target
 | `session/new` | Creates a fresh agent with an absolute primary `cwd`; empty `additionalDirectories` and `mcpServers` are accepted, non-empty values reject. |
 | `session/prompt` | Concatenates text blocks, renders baseline resource links as bracketed textual references, rejects empty or beyond-baseline input, permits one in-flight request per session, and waits for the whole agent to become idle. Normal quiescence reports `end_turn`; explicit ACP cancellation, disposal, or a prompt whose admission was discarded (a turnless slot) reports `cancelled`. |
 | `session/cancel` | Cancels only the addressed agent and settles its pending prompt as `cancelled`; unknown ids are no-ops. |
-| `session/update` | Emits one `agent_message_chunk` per non-empty text block in a committed `assistant/message`. Raw deltas and non-message events are omitted. |
+| `session/update` | In `committed` mode, emits one `agent_message_chunk` per non-empty text block in a committed `assistant/message`. In `rich` mode, emits text and reasoning deltas, tool-call lifecycle updates, and todo plans without repeating the committed text. |
 | `session/request_permission` | Offers one-shot allow/reject choices for bridge-owned approval requests carrying a tool call id. Clients may answer automatically. |
 
 One connection may own several sessions. The bridge keys records by branded session id and checks exact agent identity before routing events or permission requests. Each session has an independent prompt slot, workspace, cancellation path, and disposer.
 
-Committed-message output intentionally trades token-by-token latency for a clean automation result. Uncommitted provider chunks and retry attempts cannot leak partial text; reasoning and tool activity remain in the session log for observability through other interfaces.
+Committed output intentionally trades token-by-token latency for a clean automation result: uncommitted provider chunks and retry attempts cannot leak partial text. Rich output favors interactive latency and can therefore show provider deltas before the step commits; all projected values originate in the same session events used for durable reconstruction.
 
 ## Lifecycle
 
@@ -41,7 +42,7 @@ ACP requires each prompt response to carry a `stopReason`, but the bridge does n
 
 ## Running
 
-`pnpm --dir /path/to/deepseek-harness run demo:acp` boots the repository's automation server composition. A parent harness can spawn it through [`@deepseek-ai/dsh-subagent-acp`](../../subagent/subagent-acp/README.md); other ACP clients need only the core methods above.
+`pnpm --dir /path/to/deepseek-harness run demo:acp` boots the repository's committed-output server composition. A parent harness can spawn it through [`@deepseek-ai/dsh-subagent-acp`](../../subagent/subagent-acp/README.md); interactive clients may select `rich` in their composition. The [ACP example](../../../examples/acp-agent/README.md#aionui-custom-agent) documents the AionUi launcher.
 
 ## Model Experience
 
@@ -77,5 +78,5 @@ Append-only through the owning tool result.
 
 - **Fresh sessions only** — load, list, resume, delete, and fork are unsupported.
 - **Baseline prompts and one workspace only** — images, audio, embedded resources, non-empty additional directories, and MCP servers reject; resource links flatten to textual references rather than fetched content.
-- **Committed answers only** — live progress, reasoning, tool activity, plans, titles, and usage stay off the wire.
+- **Projection is connection-wide** — one bridge instance selects committed or rich output for all sessions; titles, usage, and UI-specific render metadata stay off the wire.
 - **Connection-owned lifetime** — one connection releases all of its sessions; per-session close is not implemented.

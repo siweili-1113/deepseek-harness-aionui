@@ -53,6 +53,8 @@
   config:
     provider: deepseek-official
     model: deepseek-v4-pro
+    # Interactive ACP clients opt into live text, reasoning, tool calls, and plans.
+    acpOutput: !!js "process.env.DSH_ACP_OUTPUT ?? 'committed'"
     persistenceRoot: !!js process.env.DSH_SNAPSHOT_SESSIONS_ROOT ?? './.sessions'
     persistenceCompression: !!js "process.env.DSH_SNAPSHOT === undefined ? 'zstd' : 'none'"
     workspaceContext:

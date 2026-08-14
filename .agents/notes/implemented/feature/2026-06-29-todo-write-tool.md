@@ -10,11 +10,11 @@ The harness gives the model bash and subagent tools but no way to record a struc
 
 ## Decision
 
-Add a model-facing `todo_write(todos: [{ content, status }])` tool whose whole-list state lives on the event-sourced session log as a new `todo/write` `SessionEventMap` variant. Interactive hosts render from the durable event: the TUI folds it directly, the web client projects it into `ConversationSnapshot.todos` ([web todo display](2026-07-23-web-todo-display.md)), while the [automation-only ACP bridge](../simplification/2026-07-23-acp-automation-only-protocol.md) deliberately omits todo presentation.
+Add a model-facing `todo_write(todos: [{ content, status }])` tool whose whole-list state lives on the event-sourced session log as a new `todo/write` `SessionEventMap` variant. Interactive hosts render from the durable event: the TUI folds it directly, the web client projects it into `ConversationSnapshot.todos` ([web todo display](2026-07-23-web-todo-display.md)), and the optional [ACP rich projection](2026-08-14-acp-rich-output-projection.md) maps it to a standard plan update. The default committed ACP projection omits todo presentation.
 
 ### Whole-list replace, three-state status
 
-The model sends the entire list every call; the new list replaces the old (last-write-wins on replay). This is the shape claude-code V1, opencode, and codex `update_plan` all use, and the shape the model is most trained on — no per-item ids, no delta protocol. `status` is exactly `pending | in_progress | completed`, the same triple as codex `update_plan`; it also matched the ACP `PlanEntryStatus` 1:1 while the bridge projected todo lists as `plan` updates, a mapping retired with the [automation-only ACP contract](../simplification/2026-07-23-acp-automation-only-protocol.md).
+The model sends the entire list every call; the new list replaces the old (last-write-wins on replay). This is the shape claude-code V1, opencode, and codex `update_plan` all use, and the shape the model is most trained on — no per-item ids, no delta protocol. `status` is exactly `pending | in_progress | completed`, the same triple as codex `update_plan` and ACP `PlanEntryStatus`, so rich ACP output projects it without another state translation.
 
 ### State on the session log, not a service
 
@@ -26,7 +26,7 @@ The list is appended as a `todo/write` event carrying the full `{ todos }` snaps
 
 ### Dropped vs claude-code V1: `activeForm`, id, priority
 
-claude-code V1's item is `{ content, status, activeForm }`; later (V2) it grew ids, dependencies, and ownership — but only to support agent *swarms* (disk-backed, lock-guarded, per-item mutation). This tool keeps the item at the minimum: `{ content, status }`. No `activeForm` (the present-continuous label) — the UI shows `content`; no id — whole-list replace needs no stable identity; no priority — that was only ever an ACP `PlanEntry` wire requirement, synthesized as a constant at the bridge boundary rather than modeled, and it left with that projection. Each dropped field is one less thing the model must produce on every call.
+claude-code V1's item is `{ content, status, activeForm }`; later (V2) it grew ids, dependencies, and ownership — but only to support agent *swarms* (disk-backed, lock-guarded, per-item mutation). This tool keeps the item at the minimum: `{ content, status }`. No `activeForm` (the present-continuous label) — the UI shows `content`; no id — whole-list replace needs no stable identity; no priority — ACP `PlanEntry` requires one, so the rich bridge projection synthesizes the neutral constant rather than expanding the durable model. Each dropped field is one less thing the model must produce on every call.
 
 ### Single owner — no swarm machinery (YAGNI)
 

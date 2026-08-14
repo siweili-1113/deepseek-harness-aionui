@@ -271,7 +271,12 @@ const SCENARIOS: Scenario[] = [
     },
     posixOnly: true,
   },
-  { name: 'todo-write', hasModelTurn: true, recorded: true },
+  {
+    name: 'todo-write',
+    hasModelTurn: true,
+    recorded: true,
+    env: { DSH_ACP_OUTPUT: 'rich' },
+  },
   {
     name: 'skill-load',
     hasModelTurn: true,
